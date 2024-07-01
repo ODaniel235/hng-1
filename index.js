@@ -2,25 +2,45 @@ import express from "express";
 import dotenv from "dotenv";
 import geoIp2 from "geoip-lite2";
 import axios from "axios";
+
 dotenv.config();
+
 const app = express();
-const PORT = 8000;
+const PORT = process.env.PORT || 8000;
+
 app.listen(PORT, () => {
-  console.log("Listening to Port: ", PORT);
+  console.log("Listening on Port: ", PORT);
 });
+
 app.get("/api/hello", async (req, res) => {
   try {
-    const visitorName = req.query.visitor_name;
-    const visitorIpFull = req.socket.remoteAddress;
-    const visitorIp = visitorIpFull.split(":")[3];
-    const visitorCity = geoIp2.lookup("146.19.109.255").city;
-    const visitorTemp = await axios.get(
-      `https://api.weatherapi.com/v1/current.json?key=${process.env.APIKEY}&q=${visitorCity}`
+    //Setting query to be Guest if the user did not add any query
+    const visitorName = req.query.visitor_name || "Guest";
+    const visitorIpFull =
+      req.headers["x-forwarded-for"] || req.socket.remoteAddress;
+
+    // Handle IPv6 addresses
+    const visitorIp = visitorIpFull.includes(":")
+      ? visitorIpFull.split(":").pop()
+      : visitorIpFull;
+    //Fetch city using geoip-lite2
+    const visitorLocation = geoIp2.lookup(visitorIp);
+    if (!visitorLocation) {
+      throw new Error("Unable to determine location from IP address");
+    }
+    //Handling error incase location is not fetched
+    const city = visitorLocation.city || "Unknown City";
+
+    const weatherResponse = await axios.get(
+      `https://api.weatherapi.com/v1/current.json?key=${process.env.APIKEY}&q=${city}`
     );
+
+    const temperature = weatherResponse.data.current.temp_c;
+
     res.status(200).json({
       client_ip: visitorIp,
-      location: visitorCity,
-      greeting: `Hello, ${visitorName}!, the temperature is ${visitorTemp.data.current.temp_c} degree Celcius in ${visitorCity}`,
+      location: city,
+      greeting: `Hello, ${visitorName}!, the temperature is ${temperature} degrees Celsius in ${city}.`,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
